@@ -1,0 +1,37 @@
+name: Publish Windows download
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+    paths: ['SetGenerator.exe', 'release.json']
+permissions:
+  contents: write
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify and publish executable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib, re
+          info = json.loads(pathlib.Path('release.json').read_text())
+          assert re.fullmatch(r'build-\d+\.\d+', info['version']), 'Invalid version'
+          data = pathlib.Path('SetGenerator.exe').read_bytes()
+          assert data[:2] == b'MZ', 'Not a Windows executable'
+          digest = hashlib.sha256(data).hexdigest()
+          assert digest == info['sha256'], 'Executable checksum mismatch'
+          pathlib.Path('SHA256SUMS').write_text(f'{digest}  SetGenerator.exe\n')
+          PY
+          version=$(jq -r .version release.json)
+          if ! gh release view "$version" > /dev/null 2>&1; then
+            gh release create "$version" --draft --target "$GITHUB_SHA" --title "Set Generator $version" --notes-file RELEASE_NOTES.md
+          fi
+          gh release upload "$version" SetGenerator.exe SHA256SUMS --clobber
+          gh release edit "$version" --draft=false --latest
